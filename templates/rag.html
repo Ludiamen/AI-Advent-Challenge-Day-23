@@ -1,0 +1,792 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RAG: реранкинг, фильтр и rewrite</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 1320px; margin: 20px auto; padding: 0 16px;
+           color:#111827; background:#fff; }
+    h1 { margin-bottom: 2px; font-size: 1.4rem; }
+    h2 { font-size: 1.02rem; margin: 0 0 8px; }
+    a { color:#2563eb; }
+    .idea { color:#4b5563; font-size:.86rem; margin-top:2px; line-height:1.45; }
+    .карточка { border:1px solid #e5e7eb; border-radius:8px; padding:12px 14px; margin:12px 0;
+                background:#fff; }
+    .ряд { display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; }
+    label { display:flex; flex-direction:column; font-size:.78rem; color:#374151; gap:3px; }
+    label.флажок { flex-direction:row; align-items:center; gap:5px; }
+    input, select { padding:6px 9px; font-size:.9rem; border:1px solid #d1d5db; border-radius:6px; }
+    input[type=number] { width:84px; }
+    button { padding:7px 14px; font-size:.9rem; border:1px solid #9ca3af; border-radius:6px;
+             background:#f9fafb; cursor:pointer; }
+    button.главная { background:#2563eb; color:#fff; border-color:#1d4ed8; }
+    button:disabled { opacity:.5; cursor:default; }
+    .плашка { display:inline-block; padding:3px 9px; border-radius:6px; font-size:.8rem; margin-right:6px; }
+    .плашка.ок { background:#ecfdf5; border:1px solid #10b981; }
+    .плашка.нет { background:#fef2f2; border:1px solid #dc2626; }
+    .мета { color:#6b7280; font-size:.78rem; }
+    table { border-collapse:collapse; width:100%; font-size:.82rem; }
+    th, td { border-bottom:1px solid #e5e7eb; padding:5px 7px; text-align:left; vertical-align:top; }
+    th { background:#f9fafb; font-weight:600; }
+    td.ч { text-align:right; font-variant-numeric: tabular-nums; }
+    .ход { height:10px; background:#e5e7eb; border-radius:5px; overflow:hidden; margin:6px 0 2px; }
+    .ход > div { height:100%; background:#2563eb; width:0; transition: width .3s; }
+    .две { display:grid; grid-template-columns: 1fr 1fr; gap:14px; }
+    @media (max-width: 900px) { .две { grid-template-columns: 1fr; } }
+    .находка { border:1px solid #e5e7eb; border-left:4px solid #93c5fd; border-radius:6px;
+               padding:7px 9px; margin:7px 0; font-size:.84rem; }
+    .фикс .находка { border-left-color:#fbbf24; }
+    .находка .паспорт { font-size:.76rem; color:#374151; margin-bottom:4px; }
+    .находка .текст { white-space:pre-wrap; line-height:1.4; }
+    .находка .поперёк { color:#b45309; font-size:.74rem; }
+    .оценка { font-variant-numeric: tabular-nums; font-weight:600; }
+    code { font-size:.76rem; background:#f3f4f6; padding:1px 4px; border-radius:3px; }
+    .чанк-ид { cursor:pointer; text-decoration:underline dotted; }
+    .место-1 { background:#dcfce7; } .место-н { background:#fef9c3; } .место-0 { background:#fee2e2; }
+    .граница { color:#9ca3af; font-size:.8rem; white-space:pre-wrap; background:#f9fafb;
+               border:1px dashed #d1d5db; border-radius:6px; padding:6px 8px; margin:6px 0; }
+    .текст-чанка { white-space:pre-wrap; font-size:.86rem; line-height:1.45; border:2px solid #2563eb;
+                   border-radius:6px; padding:8px 10px; max-height:420px; overflow-y:auto; }
+    .ошибка { background:#fde8e8; color:#9b1c1c; padding:6px 10px; border-radius:6px; font-size:.84rem; }
+    .победа { font-weight:600; color:#047857; }
+    details summary { cursor:pointer; font-weight:600; font-size:.9rem; }
+    .справка { font-size:.84rem; line-height:1.5; color:#374151; }
+    mark { background:#fde68a; padding:0 1px; }
+    .ответ { border:1px solid #e5e7eb; border-radius:8px; padding:10px 12px; background:#fff; }
+    .ответ.с-rag { border-top:4px solid #059669; }
+    .ответ.без-rag { border-top:4px solid #9ca3af; }
+    .ответ .текст-ответа { white-space:pre-wrap; font-size:.92rem; line-height:1.5; margin:6px 0; }
+    .ссылка-n { background:#dcfce7; border-radius:3px; padding:0 2px; font-weight:600; }
+    .источник { font-size:.8rem; margin:2px 0; }
+    .источник.процитирован { font-weight:600; }
+    .оценка-ок { background:#dcfce7; } .оценка-нет { background:#fee2e2; } .оценка-част { background:#fef9c3; }
+    .этапы { font-size:.84rem; margin:8px 0; line-height:1.55; }
+    .этапы b { color:#1d4ed8; }
+    .судьба-в-промпт { background:#dcfce7; } .судьба-ниже-порога { background:#fee2e2; }
+    .судьба-за-пределами-k { background:#fef9c3; } .судьба-порог-косинуса { background:#f3f4f6; }
+    .запрос-rewrite { display:inline-block; background:#eef2ff; border:1px solid #c7d2fe; border-radius:6px;
+                      padding:2px 8px; margin:2px 4px 2px 0; font-size:.82rem; }
+    .режимы-поиска td, .режимы-поиска th { font-size:.8rem; }
+    textarea { width:100%; box-sizing:border-box; padding:7px 9px; font-size:.95rem; border:1px solid #d1d5db;
+               border-radius:6px; font-family:inherit; }
+  </style>
+</head>
+<body>
+  <p class="мета"><a href="/">← к агенту</a></p>
+  <h1>RAG: реранкинг, фильтр и rewrite</h1>
+  <p class="idea">
+    <b>День 23 — второй этап поиска.</b> Первый этап (bge-m3) берёт кандидатов шире —
+    top-K<sub>до</sub>; <b>реранкер</b> (кросс-энкодер bge-reranker-v2-m3 локально, эвристика
+    или LLM) оценивает каждую пару «вопрос + фрагмент» целиком и переупорядочивает; всё ниже
+    <b>порога отсечения</b> уходит, в промпт идут top-K<sub>после</sub>. <b>Query rewrite</b>
+    переписывает вопрос в 2–3 поисковых запроса на языке документов; их находки сливаются.
+    Порог, K и реранкер <b>подобраны</b> на 24 вопросах и 5 ловушках Дня 21, а качество
+    проверено на 10 контрольных вопросах Дня 22 в четырёх режимах: база, + фильтр, + rewrite,
+    + rewrite и фильтр.
+  </p>
+  <p class="idea">
+    <b>День 22 — первый RAG-запрос.</b> Вопрос → поиск релевантных чанков в индексе → фрагменты
+    с паспортом (файл, раздел, пункт, страница) кладутся в промпт вместе с вопросом → ответ
+    модели со ссылками [n]. Тот же вопрос той же модели <b>без RAG</b> — для сравнения: без
+    документов модель либо честно не знает, либо выдаёт правдоподобное «обычно в таких
+    договорах…». Десять <b>контрольных вопросов</b> (восемь с ответом в документах и две
+    ловушки, ответа на которые нет) сравнивают режимы числами: правила по ключевым фактам и
+    источникам плюс модель-судья, которая ловит выдуманную конкретику.
+  </p>
+  <p class="idea">
+    Ниже — индекс Дня 21, на котором всё это стоит. Документы организации — договоры связи (PDF с текстом и
+    сканы), бюджетные формы по ИТ (Excel) — режутся на <b>чанки</b>, для каждого считается
+    <b>вектор</b> локальной моделью <code>bge-m3</code> в Ollama, и всё ложится в
+    <code>index/docs.db</code> вместе с <b>паспортом</b> чанка: файл, раздел, страницы, пункт,
+    <code>chunk_id</code>. Стратегий две: <b>«фикс»</b> режет по числу токенов с перекрытием и
+    структуры не видит, <b>«структура»</b> режет по разделам договора, листам таблиц и главам.
+    Поиск ниже спрашивает оба индекса одним вектором запроса — видно, чем они отличаются, а
+    «Сравнить стратегии» считает это числами на эталонных вопросах.
+  </p>
+
+  <details class="карточка">
+    <summary>❓ Справка по форме</summary>
+    <div class="справка">
+      <p><b>Собрать индекс.</b> Галочки — какие стратегии пересобрать. «Размер» и «Перекрытие»
+        — в токенах, для «фикс»; «Предел раздела» — наибольший чанк «структуры» (раздел длиннее
+        делится по абзацам и пунктам, а не посреди слова). «Эмбеддер»: <code>ollama</code> —
+        bge-m3 локально, документы не покидают машину; <code>хэш</code> — мешок слов без модели,
+        для проверок. «Распознавать сканы» — страницы PDF без текстового слоя уходят в tesseract;
+        распознанное кэшируется в <code>index/ocr/</code>, второй раз ждать не придётся. Векторы
+        тоже кэшируются по тексту: повторная сборка с теми же чанками идёт секунды.</p>
+      <p><b>Документы.</b> Что извлечено из каждого файла: страницы, символы, сколько страниц
+        прошло OCR, сколько чанков дала каждая стратегия и что пропущено.</p>
+      <p><b>Поиск.</b> Запрос своими словами. Слева «структура», справа «фикс» — по одному и
+        тому же вектору запроса. У находки: косинусное сходство, файл, раздел, пункт, страницы.
+        Оранжевая пометка «поперёк» — чанк задел несколько разделов. Нажмите на
+        <code>chunk_id</code> — откроется чанк целиком, а серым будут показаны конец
+        предыдущего и начало следующего: видно, где прошла граница.</p>
+      <p><b>Сравнение.</b> Две половины. «Как нарезано» — число и размеры чанков, избыточность
+        от перекрытия, чанки поперёк разделов, абзацы и строки таблиц, разрезанные границей.
+        «Как находится» — эталонные вопросы из <code>rag-questions.json</code>: попадание
+        засчитывается чанку нужного документа, где опорная фраза ответа есть целиком.
+        hit@k — доля вопросов с попаданием в первых k, MRR — среднее 1/место. Отчёт пишется и
+        файлом <code>RAG-COMPARISON.md</code>.</p>
+      <p><b>Поиск в два этапа</b> (День 23). «Режим» — один из четырёх: «база» (поиск Дня 22:
+        top-5 по косинусу), «фильтр» (реранкер и порог), «rewrite» (переписанные запросы без
+        реранкера), «полный» (оба). Поля «Реранкер», «K до», «K после», «Порог» и «Rewrite» —
+        поправки к режиму: пустое поле — значение режима из подбора. «Показать отбор» ничего не
+        спрашивает у модели ответа: видно, какие запросы ушли в поиск, сколько кандидатов нашёл
+        первый этап, какую оценку дал реранкер и почему каждый кандидат попал в промпт или нет
+        (зелёный — в промпт, красный — ниже порога, жёлтый — за пределами K). «Ответить во всех
+        режимах» задаёт вопрос модели четыре раза — по одному на режим поиска.</p>
+      <p><b>Подбор порога и top-K</b> — таблицы подбора: лучшая конфигурация каждого реранкера,
+        кривая порога и таблица K для выбранного, цена второго этапа в секундах. «Подобрать
+        заново» пересчитывает всё (с кросс-энкодером — десятки минут) и переписывает
+        <code>rag-settings.json</code>.</p>
+      <p><b>Вопрос по документам</b> (День 22). «Режим»: «оба рядом» — один вопрос задаётся
+        модели без документов и с ними, ответы ставятся рядом; «с RAG» или «без RAG» — один
+        режим. «Модель» — одна на оба режима, чтобы разница шла от контекста, а не от модели.
+        Под ответом с RAG — источники, на которые он сослался ([n] подсвечены), и все
+        фрагменты, ушедшие в промпт, со сходством. Если во фрагментах ответа нет, модель
+        обязана сказать «В документах этого нет».</p>
+      <p><b>Контрольные вопросы</b> — <code>rag-control.json</code>: у каждого ожидание и
+        источники. «Прогнать во всех режимах» задаёт все десять в пяти режимах — без RAG, база,
+        + фильтр, + rewrite, + rewrite и фильтр; ответы проверяют правила
+        (ключевые факты, нужный файл и раздел среди найденных и процитированных) и судья
+        (<code>groq-20b</code>: верно / частично / неверно и «выдумка»). Отчёт пишется и файлом
+        <code>RAG-QA.md</code>.</p>
+      <p>То же из консоли: <code>python cli.py --отбор «…»</code> (с <code>--поиск</code>,
+        <code>--реранкер</code>, <code>--k-до</code>, <code>--k-после</code>,
+        <code>--порог-отсечения</code>, <code>--rewrite</code>), <code>--сравнить-поиск «…»</code>,
+        <code>--rag «…» --поиск фильтр</code>, <code>--подобрать</code>,
+        <code>--настройки-поиска</code>, <code>--контрольные --режимы …</code>,
+        <code>--сравнить-rag «…»</code>,
+        <code>--rag «…»</code>, <code>--без-rag «…»</code>, <code>--контрольные</code>,
+        <code>python cli.py --индексировать</code>,
+        <code>--найти-в-документах «…»</code>, <code>--чанк ID</code>,
+        <code>--сравнить-стратегии</code>. Агенту индекс доступен как MCP-сервер
+        <code>docs</code>: включите на главной «Давать инструменты модели» и впишите
+        <code>docs</code>.</p>
+    </div>
+  </details>
+
+  <div class="карточка" id="отбор-карточка">
+    <h2>Поиск в два этапа <span class="мета" id="настройки-источник"></span></h2>
+    <div id="режимы-поиска"></div>
+    <label>Вопрос<textarea id="отбор-вопрос" rows="2" placeholder="например: за сколько дней Ростелеком обязан предупредить об изменении тарифов?"></textarea></label>
+    <div class="ряд" style="margin-top:8px">
+      <label>Режим
+        <select id="отбор-режим">
+          <option value="полный">полный: rewrite + реранкер</option>
+          <option value="фильтр">фильтр: реранкер и порог</option>
+          <option value="rewrite">rewrite без реранкера</option>
+          <option value="база">база Дня 22</option>
+        </select>
+      </label>
+      <label>Реранкер
+        <select id="отбор-реранкер">
+          <option value="*">как в режиме</option>
+          <option value="кросс">кросс-энкодер</option>
+          <option value="эвристика">эвристика</option>
+          <option value="llm">LLM</option>
+          <option value="">без реранкера</option>
+        </select>
+      </label>
+      <label>K до<input type="number" id="отбор-kдо" min="1" max="50" placeholder="режим"></label>
+      <label>K после<input type="number" id="отбор-kпосле" min="1" max="20" placeholder="режим"></label>
+      <label>Порог<input type="number" id="отбор-порог" min="0" max="1" step="0.01" placeholder="режим"></label>
+      <label>Rewrite
+        <select id="отбор-rewrite">
+          <option value="*">как в режиме</option>
+          <option value="да">да</option>
+          <option value="нет">нет</option>
+        </select>
+      </label>
+      <button id="показать-отбор" class="главная">Показать отбор</button>
+      <button id="ответить-все">Ответить во всех режимах</button>
+    </div>
+    <div id="отбор"></div>
+    <div id="ответы-поиск"></div>
+  </div>
+
+  <div class="карточка" id="rag-вопрос-карточка">
+    <h2>Вопрос по документам</h2>
+    <label>Вопрос<textarea id="rag-вопрос" rows="2" placeholder="например: какая неустойка за просрочку оплаты по договору с ВымпелКомом?"></textarea></label>
+    <div class="ряд" style="margin-top:8px">
+      <label>Режим
+        <select id="rag-режим">
+          <option value="оба">оба рядом: без RAG и с RAG</option>
+          <option value="rag">только с RAG</option>
+          <option value="без">только без RAG</option>
+        </select>
+      </label>
+      <label>Модель
+        <select id="rag-модель">
+          {% for м in models %}
+          <option value="{{ м.key }}" {% if м.key == rag_model %}selected{% endif %} {% if not м.available %}disabled{% endif %}>{{ м.label }}{% if not м.available %} (нет ключа){% endif %}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Фрагментов<input type="number" id="rag-сколько" value="5" min="1" max="10"></label>
+      <button id="rag-спросить" class="главная">Спросить</button>
+    </div>
+    <div id="rag-ответы"></div>
+  </div>
+
+  <div class="карточка" id="контроль-карточка">
+    <h2>Контрольные вопросы <span class="мета">10 вопросов · ожидание и источники в rag-control.json</span></h2>
+    <div class="ряд">
+      <label class="флажок"><input type="checkbox" id="контроль-судья" checked> судья-модель</label>
+      <button id="прогнать-контроль" class="главная">Прогнать во всех режимах</button>
+      <span class="мета">каждый вопрос — без RAG и в четырёх режимах поиска на модели из карточки выше; результат — и в RAG-QA.md</span>
+    </div>
+    <div id="контроль-ход"></div>
+    <div id="контроль"></div>
+  </div>
+
+  <div class="карточка" id="подбор-карточка">
+    <h2>Подбор порога и top-K <span class="мета">24 вопроса и 5 ловушек Дня 21 · контрольные в подборе не участвуют</span></h2>
+    <div class="ряд">
+      <button id="подобрать">Подобрать заново</button>
+      <span class="мета">три реранкера × rewrite × K до × K после × порог; с кросс-энкодером на CPU — десятки минут</span>
+    </div>
+    <div id="подбор-ход"></div>
+    <div id="подбор"></div>
+  </div>
+
+  <div class="карточка" id="состояние-карточка">
+    <div id="состояние">Загрузка…</div>
+  </div>
+
+  <div class="карточка">
+    <h2>Собрать индекс</h2>
+    <div class="ряд">
+      <label class="флажок"><input type="checkbox" class="стратегия" value="фикс" checked> «фикс»</label>
+      <label class="флажок"><input type="checkbox" class="стратегия" value="структура" checked> «структура»</label>
+      <label>Размер, ток.<input type="number" id="размер" value="500" min="50" max="4000"></label>
+      <label>Перекрытие, ток.<input type="number" id="перекрытие" value="75" min="0" max="2000"></label>
+      <label>Предел раздела, ток.<input type="number" id="макс" value="700" min="100" max="4000"></label>
+      <label>Эмбеддер
+        <select id="эмбеддер">
+          <option value="ollama">ollama:bge-m3 — локально</option>
+          <option value="хэш">хэш — без модели</option>
+        </select>
+      </label>
+      <label class="флажок"><input type="checkbox" id="ocr" checked> распознавать сканы</label>
+      <button id="собрать" class="главная">Собрать индекс</button>
+    </div>
+    <div id="работа"></div>
+  </div>
+
+  <div class="карточка">
+    <h2>Документы <span class="мета" id="документы-итог"></span></h2>
+    <div id="документы"></div>
+  </div>
+
+  <div class="карточка">
+    <h2>Поиск по индексу</h2>
+    <div class="ряд">
+      <label style="flex:1">Запрос
+        <input id="запрос" placeholder="например: до какого числа платить за связь">
+      </label>
+      <label>Где
+        <select id="где">
+          <option value="обе">обе стратегии рядом</option>
+          <option value="структура">только «структура»</option>
+          <option value="фикс">только «фикс»</option>
+        </select>
+      </label>
+      <label>Сколько<input type="number" id="сколько" value="3" min="1" max="20"></label>
+      <button id="искать" class="главная">Найти</button>
+    </div>
+    <div id="находки"></div>
+    <div id="чанк"></div>
+  </div>
+
+  <div class="карточка">
+    <h2>Сравнение стратегий</h2>
+    <div class="ряд">
+      <button id="сравнить" class="главная">Сравнить стратегии</button>
+      <span class="мета">статистика нарезки и эталонные вопросы; результат — и в RAG-COMPARISON.md</span>
+    </div>
+    <div id="сравнение"></div>
+  </div>
+
+<script>
+let состояние = null;
+let опрос = null;
+
+function экранировать(т) {
+  return String(т ?? '').replace(/[&<>"']/g, с => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[с]));
+}
+
+function число(n) { return Number(n || 0).toLocaleString('ru-RU'); }
+
+async function запрос(путь, тело) {
+  const ответ = await fetch(путь, тело === undefined ? {} : {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(тело)});
+  const данные = await ответ.json().catch(() => ({error: 'сервер ответил не JSON'}));
+  if (!ответ.ok) throw new Error(данные.error || ответ.statusText);
+  return данные;
+}
+
+async function обновить() {
+  try {
+    состояние = await запрос('/api/rag');
+  } catch (e) {
+    document.getElementById('состояние').innerHTML = `<div class="ошибка">${экранировать(e.message)}</div>`;
+    return;
+  }
+  нарисоватьСостояние();
+  нарисоватьРаботу();
+  нарисоватьДокументы();
+  нарисоватьСравнение();
+  нарисоватьКонтроль();
+  нарисоватьРежимыПоиска();
+  нарисоватьПодбор();
+  const идёт = состояние.работа && !состояние.работа.готово;
+  if (идёт && !опрос) опрос = setInterval(обновить, 1000);
+  if (!идёт && опрос) { clearInterval(опрос); опрос = null; }
+}
+
+function нарисоватьСостояние() {
+  const с = состояние;
+  const э = с.эмбеддер, о = с.ocr;
+  const индексы = с.индексы.map(и =>
+    `<div>«${экранировать(и.стратегия)}» — чанков <b>${число(и.чанков)}</b>, документов ${и.документов},
+      токенов ${число(и.токенов)}; <code>${экранировать(и.эмбеддер)}</code>, вектор ${и.размерность};
+      собран ${экранировать(и.создан.replace('T', ' '))}
+      <span class="мета">(${Object.entries(и.параметры).map(([к, з]) => `${к} ${з}`).join(', ')})</span></div>`).join('');
+  document.getElementById('состояние').innerHTML = `
+    <div style="margin-bottom:6px">
+      <span class="плашка ${э.готов ? 'ок' : 'нет'}">эмбеддер ${экранировать(э.имя)}: ${э.готов ? 'готов' : 'недоступен'}</span>
+      <span class="плашка ${о.готов ? 'ок' : 'нет'}">OCR: ${о.готов ? 'tesseract готов' : 'недоступен'}</span>
+      <span class="мета">документы: <code>${экранировать(с.каталог)}</code> · индекс: <code>${экранировать(с.база)}</code></span>
+    </div>
+    ${э.готов ? '' : `<div class="мета">⚠ ${экранировать(э.почему)}</div>`}
+    ${о.готов ? '' : `<div class="мета">⚠ ${экранировать(о.почему)}</div>`}
+    ${индексы || '<div class="мета">Индекс ещё не собран.</div>'}`;
+  const эмбеддер = document.getElementById('эмбеддер');
+  if (!эмбеддер.dataset.тронут && с.индексы.length) {
+    эмбеддер.value = с.индексы[0].эмбеддер.startsWith('ollama') ? 'ollama' : 'хэш';
+  }
+}
+
+function нарисоватьРаботу() {
+  const р = состояние.работа;
+  // Ход контрольных вопросов и подбора — в их карточках, остальное — в «Собрать индекс».
+  const своё = {'контроль': 'контроль-ход', 'подбор': 'подбор-ход'};
+  const цель = (р && своё[р.вид]) || 'работа';
+  ['работа', 'контроль-ход', 'подбор-ход'].filter(id => id !== цель)
+    .forEach(id => { document.getElementById(id).innerHTML = ''; });
+  const место = document.getElementById(цель);
+  const кнопки = ['собрать', 'сравнить', 'прогнать-контроль', 'подобрать'].map(id => document.getElementById(id));
+  const идёт = р && !р.готово;
+  кнопки.forEach(к => к.disabled = идёт);
+  if (!р) { место.innerHTML = ''; return; }
+  const доля = р.всего ? Math.round(100 * р.сделано / р.всего) : (р.готово ? 100 : 0);
+  let итог = '';
+  if (р.готово && р.ошибка) итог = `<div class="ошибка">${экранировать(р.вид)} прервалась: ${экранировать(р.ошибка)}</div>`;
+  else if (р.готово && р.вид === 'сборка' && р.итог) {
+    const о = р.итог;
+    итог = `<div>Сборка готова за <b>${о.секунд} с</b> (извлечение ${о.секунд_извлечения} с): ` +
+      Object.entries(о.стратегии).map(([к, с]) =>
+        `«${экранировать(к)}» — чанков <b>${с.чанков}</b>, медиана ${с.медиана} ток., векторы ${с.секунд_векторов} с, из кэша ${с.из_кэша}`).join('; ') + '</div>';
+  } else if (р.готово && р.вид === 'контроль' && р.итог) {
+    const т = р.итог.итог;
+    итог = `<div>Контрольные вопросы готовы: верно по правилам — ` + Object.entries(т).map(([м, x]) =>
+      `${экранировать(имяРежима(м))} <b>${x.верно_по_правилам}</b>`).join(', ') + ` из ${Object.values(т)[0].вопросов}.</div>`;
+  } else if (р.готово && р.вид === 'подбор' && р.итог) {
+    const в = р.итог.выбрано;
+    итог = `<div>Подбор готов: реранкер <b>«${экранировать(в.реранкер)}»</b>, K до ${в.k_до}, K после ${в.k_после}, порог ${в.порог}.</div>`;
+  } else if (р.готово && р.вид === 'сравнение') {
+    итог = `<div>Сравнение готово${р.итог && р.итог.лучшая ? `: по MRR выигрывает <span class="победа">«${экранировать(р.итог.лучшая)}»</span>` : ''}.</div>`;
+  }
+  место.innerHTML = `
+    <div class="мета" style="margin-top:8px">${экранировать(р.вид)}: ${экранировать(р.этап || 'старт')}
+      ${р.всего ? `— ${р.сделано}/${р.всего}` : ''} ${р.что ? '· ' + экранировать(р.что) : ''}
+      ${р.готово ? '' : ' …'}</div>
+    <div class="ход"><div style="width:${доля}%"></div></div>${итог}`;
+}
+
+function нарисоватьДокументы() {
+  const д = состояние.документы;
+  const стратегии = состояние.стратегии;
+  const итог = document.getElementById('документы-итог');
+  if (!д.length) {
+    document.getElementById('документы').innerHTML = '<div class="мета">Пока пусто — соберите индекс.</div>';
+    итог.textContent = '';
+    return;
+  }
+  const страниц = д.filter(x => x.вид === 'pdf').reduce((s, x) => s + x.страниц, 0);
+  const ocr = д.reduce((s, x) => s + x.распознано.length, 0);
+  const символов = д.reduce((s, x) => s + x.символов, 0);
+  итог.textContent = `${д.length} файлов · страниц PDF ${страниц} (OCR ${ocr}) · символов ${число(символов)}`;
+  document.getElementById('документы').innerHTML = `<table><tr><th>файл</th><th>вид</th>
+    <th>стр./листов</th><th>символов</th><th>OCR стр.</th>
+    ${стратегии.map(с => `<th>чанков «${с}»</th>`).join('')}<th>замечания</th></tr>
+    ${д.map(x => `<tr><td>${экранировать(x.источник)}${x.название && !x.источник.startsWith(x.название) ?
+        `<div class="мета">${экранировать(x.название)}</div>` : ''}</td>
+      <td>${экранировать(x.вид)}</td><td class="ч">${x.страниц}</td><td class="ч">${число(x.символов)}</td>
+      <td class="ч">${x.распознано.length || ''}</td>
+      ${стратегии.map(с => `<td class="ч">${x.чанков[с] ?? '—'}</td>`).join('')}
+      <td class="мета">${x.замечания.map(экранировать).join('<br>')}</td></tr>`).join('')}</table>`;
+}
+
+function подсветить(текст, запрос) {
+  let html = экранировать(текст);
+  const основы = [...new Set(запрос.toLowerCase().split(/[^0-9a-zа-яё]+/i).filter(с => с.length > 3).map(с => с.slice(0, 5)))];
+  for (const о of основы) {
+    html = html.replace(new RegExp(`(${о.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[0-9a-zа-яё]*)`, 'gi'), '<mark>$1</mark>');
+  }
+  return html;
+}
+
+function находкаHTML(н, запрос) {
+  const поперёк = н.sections.length > 1
+    ? `<div class="поперёк">поперёк: ${н.sections.map(экранировать).join(' | ')}</div>` : '';
+  return `<div class="находка">
+    <div class="паспорт"><span class="оценка">${н.rank}. [${н.score.toFixed(3)}]</span>
+      <b>${экранировать(н.source)}</b> · ${экранировать(н.section)}${н.clause ? ', п. ' + экранировать(н.clause) : ''}
+      ${н.pages ? '· стр. ' + экранировать(н.pages) : ''} ·
+      <code class="чанк-ид" data-ид="${экранировать(н.chunk_id)}">${экранировать(н.chunk_id)}</code>
+      <span class="мета">${н.tokens} ток.${н.ocr ? ', OCR' : ''}</span></div>
+    ${поперёк}<div class="текст">${подсветить(н.text, запрос)}</div></div>`;
+}
+
+async function искать() {
+  const запросТекст = document.getElementById('запрос').value.trim();
+  const место = document.getElementById('находки');
+  document.getElementById('чанк').innerHTML = '';
+  if (!запросТекст) return;
+  место.innerHTML = '<div class="мета">Ищу…</div>';
+  const эмбеддер = состояние && состояние.индексы.length ? состояние.индексы[0].эмбеддер : '';
+  try {
+    const о = await запрос('/api/rag/search', {query: запросТекст, strategy: document.getElementById('где').value,
+      limit: +document.getElementById('сколько').value, embedder: эмбеддер});
+    const колонки = Object.entries(о.results).sort(([а], [б]) => а === 'структура' ? -1 : б === 'структура' ? 1 : 0);
+    место.innerHTML = `<div class="мета" style="margin:6px 0">«${экранировать(о.query)}» · ${экранировать(о.embedder)}</div>
+      <div class="${колонки.length > 1 ? 'две' : ''}">${колонки.map(([с, находки]) =>
+        `<div class="${с === 'фикс' ? 'фикс' : 'структура'}" data-стратегия="${экранировать(с)}"><h2>«${экранировать(с)}»</h2>
+          ${находки.length ? находки.map(н => находкаHTML(н, о.query)).join('') : '<div class="мета">ничего</div>'}</div>`).join('')}</div>`;
+  } catch (e) {
+    место.innerHTML = `<div class="ошибка">${экранировать(e.message)}</div>`;
+  }
+}
+
+async function показатьЧанк(ид) {
+  const место = document.getElementById('чанк');
+  try {
+    const о = await запрос('/api/rag/chunk/' + encodeURIComponent(ид));
+    const ч = о.chunk;
+    место.innerHTML = `<h2 style="margin-top:12px">Чанк <code>${экранировать(ч.chunk_id)}</code>
+        <span class="мета">«${экранировать(ч.strategy)}» · ${экранировать(ч.source)} · ${экранировать(ч.section)}
+        ${ч.pages ? '· стр. ' + экранировать(ч.pages) : ''} · ${ч.tokens} ток. · №${ч.position}</span></h2>
+      ${о.previous ? `<div class="граница">…конец предыдущего (${экранировать(о.previous.chunk_id)}): ${экранировать(о.previous.text.slice(-240))}</div>` : ''}
+      <div class="текст-чанка">${экранировать(ч.text)}</div>
+      ${о.next ? `<div class="граница">начало следующего (${экранировать(о.next.chunk_id)}): ${экранировать(о.next.text.slice(0, 240))}…</div>` : ''}`;
+    место.scrollIntoView({behavior: 'smooth', block: 'start'});
+  } catch (e) {
+    место.innerHTML = `<div class="ошибка">${экранировать(e.message)}</div>`;
+  }
+}
+
+function нарисоватьСравнение() {
+  const о = состояние.сравнение;
+  const место = document.getElementById('сравнение');
+  if (!о) { место.innerHTML = '<div class="мета">Сравнения ещё не было.</div>'; return; }
+  const с = Object.keys(о.нарезка);
+  const н = о.нарезка;
+  const строка = (имя, f) => `<tr><td>${имя}</td>${с.map(к => `<td class="ч">${f(н[к])}</td>`).join('')}</tr>`;
+  const проц = x => Math.round(100 * x) + '%';
+  let html = `<div class="мета" style="margin:8px 0">Собрано ${экранировать(о.когда.replace('T', ' '))} ·
+    <code>${экранировать(о.эмбеддер)}</code> · документов ${о.документов}, страниц PDF ${о.страниц}
+    (OCR ${о.распознано_страниц}), листов ${о.листов}, символов ${число(о.символов)}</div>
+    <div class="две"><div><h2>Как нарезано</h2><table><tr><th>показатель</th>${с.map(к => `<th>«${к}»</th>`).join('')}</tr>
+    <tr><td>параметры</td>${с.map(к => `<td class="ч мета">${Object.entries(о.параметры[к]).map(([п, з]) => `${п} ${з}`).join(', ')}</td>`).join('')}</tr>
+    ${строка('чанков', х => х.чанков)}
+    ${строка('размер: мин / медиана / p90 / макс', х => `${х.мин} / ${х.медиана} / ${х.p90} / ${х.макс}`)}
+    ${строка('избыточность от перекрытия', х => х.избыточность.toFixed(2))}
+    ${строка('чанков поперёк разделов', х => `${х.поперёк_разделов} (${проц(х.доля_поперёк)})`)}
+    ${строка('чанков с середины фразы', х => `${х.с_середины_фразы} (${проц(х.доля_с_середины)})`)}
+    ${строка('абзацев и строк, разрезанных границей', х => `${х.разорвано_блоков} из ${х.блоков} (${проц(х.доля_разорванных)})`)}
+    </table></div>`;
+  const п = о.поиск;
+  if (п) {
+    const стр = Object.keys(п.стратегии);
+    const лучшая = стр.reduce((а, б) => (п.стратегии[б].mrr > п.стратегии[а].mrr ? б : а), стр[0]);
+    html += `<div><h2>Как находится <span class="мета">${п.вопросов} эталонных вопросов</span></h2>
+      <table><tr><th>метрика</th>${стр.map(к => `<th>«${к}»</th>`).join('')}</tr>
+      ${Object.keys(п.стратегии[стр[0]]).map(м => `<tr><td>${м}</td>${стр.map(к =>
+        `<td class="ч ${к === лучшая && м === 'mrr' ? 'победа' : ''}">${п.стратегии[к][м].toFixed(2)}</td>`).join('')}</tr>`).join('')}
+      </table><div class="мета" style="margin-top:4px">Попадание — чанк нужного документа с опорной фразой ответа целиком.
+      По MRR лучше <span class="победа">«${экранировать(лучшая)}»</span>.</div></div>`;
+  }
+  html += '</div>';
+  if (п) {
+    const стр = Object.keys(п.стратегии);
+    const клетка = м => м === 0 ? 'место-0' : м === 1 ? 'место-1' : 'место-н';
+    html += `<details style="margin-top:10px" open><summary>По вопросам</summary><table style="margin-top:6px">
+      <tr><th>#</th><th>вопрос</th><th>опорная фраза</th>${стр.map(к => `<th>место «${к}»</th>`).join('')}</tr>
+      ${п.вопросы.map(в => `<tr><td>${экранировать(в.id)}</td><td>${экранировать(в.вопрос)}</td>
+        <td class="мета">${экранировать(в.маркеры[0])}</td>
+        ${стр.map(к => `<td class="ч ${клетка(в.места[к].место)}">${в.места[к].место || '—'}</td>`).join('')}</tr>`).join('')}
+      </table></details>`;
+  }
+  место.innerHTML = html;
+}
+
+document.getElementById('эмбеддер').addEventListener('change', e => { e.target.dataset.тронут = '1'; });
+
+document.getElementById('собрать').addEventListener('click', async () => {
+  const стратегии = [...document.querySelectorAll('.стратегия:checked')].map(х => х.value);
+  try {
+    await запрос('/api/rag/build', {strategies: стратегии, size: +document.getElementById('размер').value,
+      overlap: +document.getElementById('перекрытие').value, max: +document.getElementById('макс').value,
+      embedder: document.getElementById('эмбеддер').value, ocr: document.getElementById('ocr').checked});
+  } catch (e) {
+    document.getElementById('работа').innerHTML = `<div class="ошибка">${экранировать(e.message)}</div>`;
+    return;
+  }
+  обновить();
+});
+
+document.getElementById('сравнить').addEventListener('click', async () => {
+  const эмбеддер = состояние && состояние.индексы.length ? состояние.индексы[0].эмбеддер : '';
+  try {
+    await запрос('/api/rag/compare', {embedder: эмбеддер});
+  } catch (e) {
+    document.getElementById('работа').innerHTML = `<div class="ошибка">${экранировать(e.message)}</div>`;
+    return;
+  }
+  обновить();
+});
+
+document.getElementById('искать').addEventListener('click', искать);
+document.getElementById('запрос').addEventListener('keydown', e => { if (e.key === 'Enter') искать(); });
+document.getElementById('находки').addEventListener('click', e => {
+  const ид = e.target.closest('.чанк-ид');
+  if (ид) показатьЧанк(ид.dataset.ид);
+});
+
+function текстСоСсылками(текст) {
+  // Модель выделяет главное **жирным** — показываем это жирным, а не звёздочками.
+  return экранировать(текст).replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/\[(\d{1,2}(?:\s*[,;]\s*\d{1,2})*)\]/g, '<span class="ссылка-n">[$1]</span>');
+}
+
+function ответHTML(о) {
+  const сRAG = о.mode === 'rag';
+  const поиск = сRAG && о.search ? ` · поиск «${экранировать(о.search)}»` : '';
+  const шапка = `<div class="мета">${сRAG ? '<b>С RAG</b>' : '<b>Без RAG</b>'}${поиск} · ${экранировать(о.model)} ·
+    вход ${о.tokens_in} ток., выход ${о.tokens_out} ток. · ${о.model_seconds} с${сRAG ? ' · поиск ' + о.search_seconds + ' с' : ''}</div>`;
+  let низ = '';
+  if (сRAG) {
+    const процитированы = new Set(о.citations);
+    низ = `<div class="мета" style="margin-top:6px">${о.refusal ? '<b>Модель ответила, что в документах этого нет.</b><br>' : ''}Источники ответа:</div>` +
+      (о.sources.length ? о.sources.map(и => `<div class="источник процитирован">[${и.n}] ${экранировать(и.source)} · ${экранировать(и.section)}${и.clause ? ', п. ' + экранировать(и.clause) : ''}${и.pages ? ' · стр. ' + экранировать(и.pages) : ''} · <code>${экранировать(и.chunk_id)}</code></div>`).join('') : '<div class="источник">— ни на что не сослался</div>') +
+      (о.bad_citations.length ? `<div class="ошибка">ссылки на несуществующие фрагменты: ${о.bad_citations.join(', ')}</div>` : '') +
+      `<details style="margin-top:6px"><summary style="font-weight:normal;font-size:.8rem">Фрагменты в промпте: ${о.fragments.length}${о.dropped.length ? ', не вошло ' + о.dropped.length : ''}</summary>` +
+      о.fragments.map(ф => `<div class="источник ${процитированы.has(ф.n) ? 'процитирован' : ''}">[${ф.n}] [${ф.score.toFixed(3)}${ф.rerank !== undefined ? ' · реранк ' + ф.rerank.toFixed(3) + ', было ' + ф.rank_before : ''}] ${экранировать(ф.source)} · ${экранировать(ф.section)}${ф.pages ? ' · стр. ' + экранировать(ф.pages) : ''}${процитированы.has(ф.n) ? ' ← процитирован' : ''}<div class="мета">${экранировать(ф.text.slice(0, 280))}…</div></div>`).join('') +
+      `</details>`;
+  } else {
+    низ = '<div class="мета" style="margin-top:6px">без документов: модель отвечает из общих знаний, источников нет</div>';
+  }
+  return `<div class="ответ ${сRAG ? 'с-rag' : 'без-rag'}" data-режим="${о.mode}">${шапка}<div class="текст-ответа">${текстСоСсылками(о.text)}</div>${низ}</div>`;
+}
+
+async function спроситьRAG() {
+  const вопрос = document.getElementById('rag-вопрос').value.trim();
+  const место = document.getElementById('rag-ответы');
+  if (!вопрос) return;
+  место.innerHTML = '<div class="мета" style="margin-top:8px">Спрашиваю модель…</div>';
+  try {
+    const о = await запрос('/api/rag/ask', {question: вопрос, mode: document.getElementById('rag-режим').value,
+      model: document.getElementById('rag-модель').value, limit: +document.getElementById('rag-сколько').value});
+    const порядок = ['без', 'rag'].filter(к => о.answers[к]);
+    место.innerHTML = `<div class="${порядок.length > 1 ? 'две' : ''}" style="margin-top:10px">${порядок.map(к => ответHTML(о.answers[к])).join('')}</div>`;
+  } catch (e) {
+    место.innerHTML = `<div class="ошибка" style="margin-top:8px">${экранировать(e.message)}</div>`;
+  }
+}
+
+const ИМЕНА_РЕЖИМОВ = {'без': 'без RAG', 'rag': 'с RAG', 'база': 'база', 'фильтр': '+ фильтр',
+                       'rewrite': '+ rewrite', 'полный': '+ rewrite и фильтр'};
+function имяРежима(м) { return ИМЕНА_РЕЖИМОВ[м] || м; }
+
+function нарисоватьКонтроль() {
+  const к = состояние.контроль;
+  const место = document.getElementById('контроль');
+  // Пока идёт новый прогон, прошлую таблицу не показываем: её числа легко
+  // принять за итог прогона, который ещё не кончился.
+  const работа = состояние.работа;
+  if (работа && работа.вид === 'контроль' && !работа.готово) {
+    место.innerHTML = '<div class="мета" style="margin-top:6px">Идёт прогон: каждый вопрос задаётся во всех режимах, ответы оценивают правила и судья…</div>';
+    return;
+  }
+  if (!к) { место.innerHTML = '<div class="мета" style="margin-top:6px">Прогона ещё не было.</div>'; return; }
+  const режимы = к.modes || Object.keys(к.totals);
+  const т = к.totals;
+  const лучший = (поле, меньше = false) => {
+    const значения = режимы.filter(м => м !== 'без').map(м => т[м][поле]);
+    return меньше ? Math.min(...значения) : Math.max(...значения);
+  };
+  const стр = (имя, f, поле = '', толькоRAG = false) => `<tr><td>${имя}</td>${режимы.map(м => {
+    if (толькоRAG && м === 'без') return '<td class="ч">—</td>';
+    const выделить = поле && м !== 'без' && т[м][поле] === лучший(поле) ? 'победа' : '';
+    return `<td class="ч ${выделить}">${f(т[м], м)}</td>`; }).join('')}</tr>`;
+  let html = `<div class="мета" style="margin:8px 0">Прогон ${экранировать(к.when.replace('T', ' '))} · модель
+    <code>${экранировать(к.model)}</code> · судья <code>${экранировать(к.judge_model || 'выключен')}</code> · ${к.seconds} с</div>
+    <table><tr><th>показатель</th>${режимы.map(м => `<th>${экранировать(имяРежима(м))}</th>`).join('')}</tr>
+    ${стр('верно по правилам', x => `${x.верно_по_правилам} из ${x.вопросов}`, 'верно_по_правилам')}
+    ${стр('ключевых фактов в ответах', x => `${x.найдено_фактов} из ${x.фактов}`, 'найдено_фактов')}
+    ${стр('ловушек пройдено', x => `${x.ловушек_пройдено} из ${x.ловушек}`)}
+    ${стр('судья: верно / частично / неверно', x => `${x.судья_верно} / ${x.судья_частично} / ${x.судья_неверно}`)}
+    ${стр('судья нашёл выдуманную конкретику', x => x.выдумок)}
+    ${стр('нужный источник в промпте / процитирован', x => `${x.источник_найден} / ${x.источник_процитирован} из ${x.с_источником}`, 'источник_процитирован', true)}
+    ${стр('опора на контекст (числа во фрагментах)', x => `${x.чисел_в_контексте} из ${x.чисел}`, '', true)}
+    ${стр('фрагментов в промпте, в среднем', x => (x.фрагментов ?? 0).toFixed(1), '', true)}
+    ${стр('токенов вход / выход', x => `${число(x.токенов_вход)} / ${число(x.токенов_выход)}`)}
+    ${стр('время поиска / всего, с', x => `${x.секунд_поиска ?? '—'} / ${x.секунд}`)}
+    ${стр('стоимость, $', x => x.стоимость.toFixed(4))}
+    </table>`;
+  const клетка = (о) => {
+    if (!о) return '<td>—</td>';
+    const класс = о.rules_ok && о.judge === 'верно' ? 'оценка-ок' : (!о.rules_ok && о.judge !== 'верно' ? 'оценка-нет' : 'оценка-част');
+    return `<td class="${класс}">${о.rules_ok ? '✓' : '✗'} · ${экранировать(о.judge || '—')}${о.made_up ? ' · <b>выдумка</b>' : ''}${о.mode === 'rag' && о.source_cited !== null ? ' · ист. ' + (о.source_cited ? '✓' : '✗') : ''}</td>`;
+  };
+  html += `<details open style="margin-top:10px"><summary>По вопросам</summary><table style="margin-top:6px">
+    <tr><th>#</th><th>вопрос</th><th>ожидание</th>${режимы.map(м => `<th>${экранировать(имяРежима(м))}</th>`).join('')}</tr>
+    ${к.questions.map(в => `<tr data-вопрос="${экранировать(в.id)}"><td>${экранировать(в.id)}${в.ловушка ? '<div class="мета">ловушка</div>' : ''}</td>
+      <td>${экранировать(в.вопрос)}</td><td class="мета">${экранировать(в.ожидание)}</td>
+      ${режимы.map(м => клетка(в.modes[м])).join('')}</tr>
+      <tr><td></td><td colspan="${2 + режимы.length}"><details><summary style="font-weight:normal;font-size:.8rem">ответы целиком</summary>
+        <div class="две" style="margin-top:6px">${режимы.filter(м => в.modes[м] && в.modes[м].answer).map(м =>
+          `<div><div class="мета"><b>${экранировать(имяРежима(м))}</b></div>` + ответHTML(в.modes[м].answer) +
+          (в.modes[м].judge_note ? `<div class="мета">судья: ${экранировать(в.modes[м].judge_note)}</div>` : '') + '</div>').join('')}</div></details></td></tr>`).join('')}
+  </table></details>`;
+  место.innerHTML = html;
+}
+
+function нарисоватьРежимыПоиска() {
+  const р = состояние.режимы_поиска || {};
+  document.getElementById('настройки-источник').textContent = состояние.настройки_поиска ? '· параметры: ' + состояние.настройки_поиска : '';
+  document.getElementById('режимы-поиска').innerHTML = `<table class="режимы-поиска" style="margin-bottom:8px">
+    <tr><th>режим</th><th>rewrite</th><th>реранкер</th><th>K до</th><th>K после</th><th>порог</th><th>порог косинуса</th></tr>
+    ${['база', 'фильтр', 'rewrite', 'полный'].filter(имя => р[имя]).map(имя => [имя, р[имя]]).map(([имя, н]) => `<tr data-режим-поиска="${экранировать(имя)}"><td><b>${экранировать(имя)}</b></td><td>${н.rewrite ? 'да' : 'нет'}</td>
+      <td>${экранировать(н.реранкер || 'нет')}</td><td class="ч">${н.k_до}</td><td class="ч">${н.k_после}</td>
+      <td class="ч">${н.реранкер ? н.порог : '—'}</td><td class="ч">${н.порог_косинуса}</td></tr>`).join('')}</table>`;
+}
+
+function отборHTML(о) {
+  const н = о.settings;
+  const этапы = о.stages.map(э => {
+    if (э.этап === 'запросы') return `<div><b>1) запросы</b>${э.cached ? ' (из кэша)' : ` (${э.seconds} с)`}: ${э.all.map((з, i) =>
+      `<span class="запрос-rewrite">${i === 0 ? 'исходный: ' : ''}${экранировать(з)}</span>`).join('')}${э.error ? ` <span class="ошибка">${экранировать(э.error)}</span>` : ''}</div>`;
+    if (э.этап === 'поиск') return `<div><b>2) первый этап</b> (bge-m3): запросов ${э.запросов}, по ${э.k_до} кандидатов → после слияния <b>${э.кандидатов}</b> · ${э.секунд} с</div>`;
+    if (э.этап === 'порог косинуса') return `<div><b>3) порог косинуса</b> ${э.порог}: осталось ${э.осталось}, отсечено ${э.отсечено}</div>`;
+    if (э.этап === 'реранк') return `<div><b>4) реранкер «${экранировать(э.реранкер)}»</b>: посчитано ${э.посчитано}, из кэша ${э.из_кэша} · ${э.секунд} с${э.ошибка ? ` <span class="ошибка">${экранировать(э.ошибка)}</span>` : ''}</div>`;
+    if (э.этап === 'фильтр') return `<div><b>5) фильтр</b>: в промпт <b>${э.осталось}</b> (K после ${э.k_после}${э.порог !== null ? ', порог ' + э.порог : ''}), ниже порога ${э.ниже_порога}, за пределами K ${э.за_пределами_k}</div>`;
+    return '';
+  }).join('');
+  const класс = с => 'судьба-' + с.replace(/ /g, '-');
+  return `<div class="мета" style="margin-top:10px">Режим «${экранировать(н.имя)}»: rewrite ${н.rewrite ? 'да' : 'нет'} · реранкер ${экранировать(н.реранкер || 'нет')} ·
+      K до ${н.k_до} · K после ${н.k_после} · порог ${н.реранкер ? н.порог : '—'} · ${о.seconds} с</div>
+    <div class="этапы">${этапы}</div>
+    <table><tr><th>место</th><th>было</th><th>cos</th><th>реранк</th><th>судьба</th><th>источник · раздел</th></tr>
+    ${о.candidates.map(к => `<tr class="${класс(к.fate)}" data-судьба="${экранировать(к.fate)}"><td class="ч">${к.fate === 'в промпт' ? к.rank : '·'}</td>
+      <td class="ч">${к.rank_before}</td><td class="ч">${к.cos.toFixed(3)}</td><td class="ч">${к.rerank === null ? '—' : к.rerank.toFixed(3)}</td>
+      <td>${экранировать(к.fate)}</td><td>${экранировать(к.source)} · ${экранировать(к.section)}${к.clause ? ' · п. ' + экранировать(к.clause) : ''}${к.pages ? ' · стр. ' + экранировать(к.pages) : ''}</td></tr>`).join('')}
+    </table>`;
+}
+
+function поправкиОтбора() {
+  const тело = {question: document.getElementById('отбор-вопрос').value.trim(),
+    search: document.getElementById('отбор-режим').value, model: document.getElementById('rag-модель').value};
+  const реранкер = document.getElementById('отбор-реранкер').value;
+  if (реранкер !== '*') тело.reranker = реранкер;
+  const kдо = document.getElementById('отбор-kдо').value, kпосле = document.getElementById('отбор-kпосле').value;
+  const порог = document.getElementById('отбор-порог').value, rewrite = document.getElementById('отбор-rewrite').value;
+  if (kдо) тело.k_before = +kдо;
+  if (kпосле) тело.k_after = +kпосле;
+  if (порог !== '') тело.cutoff = +порог;
+  if (rewrite !== '*') тело.rewrite = rewrite === 'да';
+  return тело;
+}
+
+async function показатьОтбор() {
+  const место = document.getElementById('отбор');
+  const тело = поправкиОтбора();
+  if (!тело.question) return;
+  document.getElementById('ответы-поиск').innerHTML = '';
+  место.innerHTML = '<div class="мета" style="margin-top:8px">Ищу: запросы → первый этап → реранкер → фильтр…</div>';
+  try {
+    const о = await запрос('/api/rag/select', тело);
+    место.innerHTML = отборHTML(о.selection);
+  } catch (e) {
+    место.innerHTML = `<div class="ошибка" style="margin-top:8px">${экранировать(e.message)}</div>`;
+  }
+}
+
+async function ответитьВоВсехРежимах() {
+  const вопрос = document.getElementById('отбор-вопрос').value.trim();
+  const место = document.getElementById('ответы-поиск');
+  if (!вопрос) return;
+  место.innerHTML = '<div class="мета" style="margin-top:8px">Спрашиваю модель в четырёх режимах поиска…</div>';
+  try {
+    const о = await запрос('/api/rag/ask', {question: вопрос, mode: 'поиск', model: document.getElementById('rag-модель').value});
+    место.innerHTML = `<div class="две" style="margin-top:10px">${['база', 'фильтр', 'rewrite', 'полный'].filter(м => о.answers[м]).map(м => [м, о.answers[м]]).map(([м, a]) =>
+      `<div data-поиск="${экранировать(м)}"><div class="мета"><b>${экранировать(имяРежима(м))}</b></div>${ответHTML(a)}</div>`).join('')}</div>`;
+  } catch (e) {
+    место.innerHTML = `<div class="ошибка" style="margin-top:8px">${экранировать(e.message)}</div>`;
+  }
+}
+
+function нарисоватьПодбор() {
+  const п = состояние.подбор;
+  const место = document.getElementById('подбор');
+  const работа = состояние.работа;
+  if (работа && работа.вид === 'подбор' && !работа.готово) {
+    место.innerHTML = '<div class="мета" style="margin-top:6px">Идёт подбор…</div>';
+    return;
+  }
+  if (!п) { место.innerHTML = '<div class="мета" style="margin-top:6px">Подбора ещё не было: режимы работают на значениях по умолчанию.</div>'; return; }
+  const в = п.выбрано;
+  const таблица = (строки, сПорогом = true) => `<table><tr><th>реранкер</th><th>K до</th><th>K после</th>${сПорогом ? '<th>порог</th>' : ''}
+      <th>hit@1</th><th>полнота</th><th>MRR</th><th>фрагментов</th><th>ловушки пусты</th></tr>
+      ${строки.map(([имя, с]) => `<tr ${имя === в.реранкер ? 'class="судьба-в-промпт"' : ''}><td>${экранировать(имя)}</td><td class="ч">${с.k_до}</td><td class="ч">${с.k_после}</td>
+        ${сПорогом ? `<td class="ч">${с.порог === null ? '—' : с.порог}</td>` : ''}<td class="ч">${с['hit@1'].toFixed(2)}</td><td class="ч">${с.полнота.toFixed(2)}</td>
+        <td class="ч">${с.mrr.toFixed(2)}</td><td class="ч">${с.фрагментов.toFixed(1)}</td><td class="ч">${Math.round(100 * с.ловушки_пусто)}%</td></tr>`).join('')}</table>`;
+  const кривая = п.порог_кривая.filter(с => !с.rewrite);
+  место.innerHTML = `<div class="мета" style="margin:8px 0">Подбор ${экранировать(п.когда.replace('T', ' '))} · ${экранировать(п.стенд)} · ${п.секунд} с</div>
+    <div>Выбрано: реранкер <b>«${экранировать(в.реранкер)}»</b>, K до <b>${в.k_до}</b>, K после <b>${в.k_после}</b>, порог <b>${в.порог}</b>;
+      полнота ${в.среднее.полнота.toFixed(2)}, MRR ${в.среднее.mrr.toFixed(2)} против базы ${п.база.полнота.toFixed(2)} / ${п.база.mrr.toFixed(2)}.</div>
+    <div class="две" style="margin-top:8px"><div><h2>Без rewrite</h2>${таблица(Object.entries(п.лучшие['без rewrite']))}</div>
+      <div><h2>С rewrite</h2>${таблица(Object.entries(п.лучшие['с rewrite']))}</div></div>
+    <div class="две" style="margin-top:8px"><div><h2>Порог отсечения («${экранировать(в.реранкер)}», без rewrite)</h2>
+      <table><tr><th>порог</th><th>hit@1</th><th>полнота</th><th>MRR</th><th>фрагментов</th><th>ловушки пусты</th></tr>
+      ${кривая.map(с => `<tr ${с.порог === в.порог ? 'class="судьба-в-промпт"' : ''}><td class="ч">${с.порог}</td><td class="ч">${с['hit@1'].toFixed(2)}</td><td class="ч">${с.полнота.toFixed(2)}</td>
+        <td class="ч">${с.mrr.toFixed(2)}</td><td class="ч">${с.фрагментов.toFixed(1)}</td><td class="ч">${Math.round(100 * с.ловушки_пусто)}%</td></tr>`).join('')}</table></div>
+      <div><h2>Цена второго этапа</h2><table><tr><th>реранкер</th><th>секунд на вопрос (20 кандидатов, без кэша)</th></tr>
+      ${Object.entries(п.задержка).map(([имя, сек]) => `<tr><td>${экранировать(имя)}</td><td class="ч">${сек < 0 ? 'недоступен' : сек.toFixed(1)}</td></tr>`).join('')}</table></div></div>`;
+}
+
+document.getElementById('rag-спросить').addEventListener('click', спроситьRAG);
+document.getElementById('показать-отбор').addEventListener('click', показатьОтбор);
+document.getElementById('ответить-все').addEventListener('click', ответитьВоВсехРежимах);
+document.getElementById('подобрать').addEventListener('click', async () => {
+  try { await запрос('/api/rag/calibrate', {}); }
+  catch (e) { document.getElementById('подбор').innerHTML = `<div class="ошибка">${экранировать(e.message)}</div>`; return; }
+  обновить();
+});
+document.getElementById('прогнать-контроль').addEventListener('click', async () => {
+  try {
+    await запрос('/api/rag/qa', {model: document.getElementById('rag-модель').value,
+      judge: document.getElementById('контроль-судья').checked});
+  } catch (e) {
+    document.getElementById('контроль').innerHTML = `<div class="ошибка">${экранировать(e.message)}</div>`;
+    return;
+  }
+  обновить();
+});
+
+обновить();
+</script>
+</body>
+</html>

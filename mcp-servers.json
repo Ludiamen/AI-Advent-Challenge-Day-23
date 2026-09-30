@@ -1,0 +1,126 @@
+{
+  "mcpServers": {
+    "tracker": {
+      "command": "${PYTHON}",
+      "args": ["${PROJECT_DIR}/tracker_server.py"],
+      "env": {
+        "TRACKER_URL": "${TRACKER_URL:-http://127.0.0.1:8766}",
+        "TRACKER_TOKEN": "${TRACKER_MOCK_TOKEN:-mock-token}",
+        "TRACKER_ORG": "${TRACKER_MOCK_ORG:-mock-org}",
+        "TRACKER_QUEUE": "MIG",
+        "TRACKER_WRITE": "1"
+      },
+      "описание": "Свой сервер вокруг API трекера задач: задачи миграции, комментарии, статусы. Работает с моком tracker_api.py",
+      "темы": ["задач", "трекер", "тикет", "mig-", "комментар", "статус", "очеред", "исполнител"],
+      "таймаут": 30
+    },
+    "tracker-real": {
+      "command": "${PYTHON}",
+      "args": ["${PROJECT_DIR}/tracker_server.py"],
+      "env": {
+        "TRACKER_URL": "https://api.tracker.yandex.net",
+        "TRACKER_TOKEN": "${TRACKER_TOKEN}",
+        "TRACKER_ORG": "${TRACKER_ORG}",
+        "TRACKER_ORG_HEADER": "${TRACKER_ORG_HEADER:-X-Cloud-Org-ID}",
+        "TRACKER_QUEUE": "${TRACKER_QUEUE:-TRACKER}",
+        "TRACKER_WRITE": "${TRACKER_WRITE:-0}"
+      },
+      "описание": "Тот же сервер, но настоящий Яндекс.Трекер: нужны TRACKER_TOKEN и TRACKER_ORG в .env. Меняющие инструменты выключены, пока не задано TRACKER_WRITE=1. Берётся только по явной просьбе человека",
+      "темы": ["настоящий трекер", "боевой трекер", "яндекс.трекер", "яндекс трекер", "tracker-real"],
+      "по_просьбе": true,
+      "замещает": "tracker",
+      "таймаут": 30
+    },
+    "scheduler": {
+      "command": "${PYTHON}",
+      "args": ["${PROJECT_DIR}/scheduler_server.py"],
+      "env": {
+        "MEMORY_DIR": "${MEMORY_DIR:-memory}",
+        "SCHEDULER_DB": "${SCHEDULER_DB:-}"
+      },
+      "описание": "Свой планировщик: отложенные и периодические вызовы инструментов MCP, история запусков и сводки. Выполняет их отдельный процесс worker.py",
+      "темы": ["расписан", "запланир", "напомн", "сводк", "регулярн", "каждые", "ежедневн", "фонов", "задани"],
+      "планирует": {"schedule_job": "tool"},
+      "своё": true,
+      "таймаут": 30
+    },
+    "pipeline": {
+      "command": "${PYTHON}",
+      "args": ["${PROJECT_DIR}/pipeline_server.py"],
+      "env": {
+        "MEMORY_DIR": "${MEMORY_DIR:-memory}",
+        "SCHEDULER_DB": "${SCHEDULER_DB:-}",
+        "PIPELINES_FILE": "${PIPELINES_FILE:-}",
+        "REPORTS_DIR": "${REPORTS_DIR:-}",
+        "PIPELINE_MODEL": "${PIPELINE_MODEL:-}",
+        "MCP_CONFIG": "${PROJECT_DIR}/mcp-servers.json",
+        "GROQ_API_KEY": "${GROQ_API_KEY:-}",
+        "ZAI_API_KEY": "${ZAI_API_KEY:-}",
+        "DEEPSEEK_API_KEY": "${DEEPSEEK_API_KEY:-}"
+      },
+      "описание": "Своя память и отчёты: поиск по памяти агента (знания, решения, задачи, диалог), выжимка данных моделью, СОХРАНЕНИЕ отчёта файлом в reports/ и запуск готовой цепочки (pipelines.json)",
+      "темы": ["отчёт", "отчет", "выжимк", "сводить", "поиск", "найди", "помнишь", "память", "конвейер", "цепочк", "сохрани", "файл"],
+      "конвейеры": {"run_pipeline": "pipeline"},
+      "своё": true,
+      "таймаут": 180
+    },
+    "docs": {
+      "command": "${PYTHON}",
+      "args": ["${PROJECT_DIR}/rag_server.py"],
+      "env": {
+        "RAG_DIR": "${RAG_DIR:-}",
+        "DOCS_DIR": "${DOCS_DIR:-}",
+        "RAG_EMBEDDER": "${RAG_EMBEDDER:-}",
+        "OLLAMA_URL": "${OLLAMA_URL:-}"
+      },
+      "описание": "Свой индекс документов организации (RAG): договоры связи, бюджетные формы по ИТ, лицензии и услуги. Поиск по смыслу, каждая находка — со ссылкой на файл, раздел и страницы. Только чтение",
+      "темы": ["договор", "документ", "ростелеком", "вымпелком", "бюджет", "бдр", "лицензи", "тариф", "оплат", "смет", "картридж", "источник", "пункт договора", "приложени"],
+      "своё": true,
+      "таймаут": 120
+    },
+
+    "agent-state": {
+      "command": "${PYTHON}",
+      "args": ["${PROJECT_DIR}/mcp_server.py"],
+      "env": {
+        "MEMORY_DIR": "${MEMORY_DIR:-memory}"
+      },
+      "описание": "Свой сервер: задачи, инварианты, условия переходов и решения агента — только чтение",
+      "темы": ["инвариант", "стади", "переход", "решени", "профил", "чья задача", "состояние задачи"]
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "${PROJECT_DIR}/agent"],
+      "описание": "Эталонный сервер файловой системы: ЧТЕНИЕ исходников агента из каталога agent/. Записывать файлы им нельзя",
+      "темы": ["исходник", "код агента", "файл кода", "каталог", "модул", "читать файл"],
+      "разрешить": ["read_*", "list_*", "search_files", "get_file_info", "directory_tree"],
+      "таймаут": 120
+    },
+    "everything": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-everything"],
+      "описание": "Эталонный тестовый сервер: все возможности протокола на игрушечных инструментах",
+      "темы": ["игрушечн", "эталонн", "проба протокола", "everything"],
+      "по_просьбе": true,
+      "таймаут": 120
+    },
+    "deepwiki": {
+      "type": "http",
+      "url": "https://mcp.deepwiki.com/mcp",
+      "описание": "Документация публичных GitHub-репозиториев (django, openlayers, postgis) — без ключа. Чужой публичный сервер: внешняя память проекта, где смотрят, как устроена библиотека",
+      "темы": ["документац", "django", "geodjango", "postgis", "openlayers", "библиотек", "как устроен", "как работает", "версия"],
+      "только_чтение": true
+    },
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/readonly",
+      "headers": {
+        "Authorization": "Bearer ${GITHUB_TOKEN}"
+      },
+      "описание": "Официальный удалённый сервер GitHub в режиме только чтения; токен — в .env",
+      "только_чтение": true,
+      "темы": ["github", "гитхаб", "репозитор", "pull request", "коммит", "issue"],
+      "запретить": ["*secret*"]
+    }
+  }
+}

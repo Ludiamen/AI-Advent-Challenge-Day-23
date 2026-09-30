@@ -1,0 +1,26 @@
+httpx>=0.27
+python-dotenv>=1.0
+flask>=3.0
+# Официальный Python SDK Model Context Protocol. Вторая мажорная версия —
+# у неё другой клиент (mcp.Client), чем в статьях под 1.x; верхняя граница,
+# чтобы третья не сломала код молча.
+mcp>=2.2,<3
+
+# Проверка JSON-схем инструментов в check_mcp.py и check_tools.py. Приходит и
+# как зависимость mcp, но скрипты пользуются им напрямую — значит, он их.
+jsonschema>=4.20
+
+# День 21 — индекс документов. numpy: векторы в памяти и поиск по косинусу одним
+# умножением матрицы; openpyxl: таблицы Excel; pypdf: число страниц и запасной
+# путь, когда pdftotext (poppler-utils) не установлен. Эмбеддер — Ollama по
+# HTTP (httpx уже есть), OCR сканов — tesseract, это программы, а не пакеты.
+numpy>=1.26
+openpyxl>=3.1
+pypdf>=4.0
+
+# День 23 — второй этап поиска. Кросс-энкодер bge-reranker-v2-m3 в сборке ONNX
+# int8 считается onnxruntime на CPU (без torch: он весил бы гигабайты ради одной
+# модели), токенизатор — tokenizers, файлы модели — из Hugging Face Hub.
+onnxruntime>=1.18
+tokenizers>=0.19
+huggingface_hub>=0.23

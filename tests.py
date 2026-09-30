@@ -7405,14 +7405,22 @@ class МаршрутСерверов(unittest.TestCase):
         # проверки «неготовый сервер отсеивается» переставали значить то, что в
         # них написано. Поэтому файл серверов читается из отдельного каталога с
         # копией .env без этой переменной: остальные значения остаются как есть.
+        #
+        # Настоящий трекер («tracker-real») — наоборот: правила «по просьбе» и
+        # «замещает» проверяются на нём, а готов он только с TRACKER_TOKEN и
+        # TRACKER_ORG. В свежем клоне без .env сервер отсеивался как неготовый,
+        # и три теста падали не из-за маршрута, а из-за чужих секретов. Тесты к
+        # трекеру не подключаются, поэтому здесь всегда заглушки.
         каталог = tempfile.mkdtemp(prefix="маршрут-серверы-")
         shutil.copy(os.path.join(КОРЕНЬ_ДНЯ, "mcp-servers.json"), каталог)
         свой = os.path.join(КОРЕНЬ_ДНЯ, ".env")
-        if os.path.exists(свой):
-            строки = [с for с in pathlib.Path(свой).read_text(encoding="utf-8").splitlines()
-                      if not с.strip().startswith("GITHUB_TOKEN")]
-            pathlib.Path(os.path.join(каталог, ".env")).write_text(
-                "\n".join(строки), encoding="utf-8")
+        лишние = ("GITHUB_TOKEN", "TRACKER_TOKEN", "TRACKER_ORG")
+        строки = [с for с in (pathlib.Path(свой).read_text(encoding="utf-8").splitlines()
+                              if os.path.exists(свой) else [])
+                  if not с.strip().startswith(лишние)]
+        строки += ["TRACKER_TOKEN=заглушка-для-тестов", "TRACKER_ORG=заглушка-для-тестов"]
+        pathlib.Path(os.path.join(каталог, ".env")).write_text(
+            "\n".join(строки), encoding="utf-8")
         прежний = os.environ.pop("GITHUB_TOKEN", None)
         try:
             return amcp.load(os.path.join(каталог, "mcp-servers.json"))
@@ -9833,15 +9841,73 @@ class Реранкеры(unittest.TestCase):
             def encode_batch(self, пары):
                 return [types.SimpleNamespace(ids=[0, 1, 2], attention_mask=[1, 1, 1]) for _ in пары]
 
+            def encode(self, текст, add_special_tokens=True):
+                return types.SimpleNamespace(ids=[0] * 3, offsets=[(0, 1)] * 3)
+
         кэш = rag_rerank.КэшОценок(self.индексатор.база)
         к = rag_rerank.КроссЭнкодер(кэш)
-        к._сессия, к._токенизатор = Сессия(), Токенизатор()
+        к._сессия, к._токенизатор, к._разметка = Сессия(), Токенизатор(), Токенизатор()
         находки = self.индексатор.найти("мерж", "фикс", 10)
         оценки = к.оценить("мерж?", находки)
         self.assertEqual(оценки, [0.5] * len(находки))       # sigmoid(0)
         self.assertEqual(к._сессия.пачки, [8, len(находки) - 8] if len(находки) > 8 else [len(находки)])
         к.оценить("мерж?", находки)
         self.assertEqual(к.из_кэша, len(находки))
+
+    def test_кросс_энкодер_оценивает_длинный_чанк_окнами(self):
+        # Пара «вопрос + чанк» обрезается на длине модели, и ответ в конце
+        # длинного чанка кросс-энкодер не видел (c03: 0,005). Окна с
+        # перекрытием и лучшее окно как оценка чанка это чинят.
+        import numpy as np
+        from agent.rag.chunking import Чанк
+        from agent.rag.store import Находка
+
+        class Посимвольно:
+            """Токен — символ: границы окон легко проверить."""
+
+            def encode(self, текст, add_special_tokens=True):
+                return types.SimpleNamespace(ids=list(range(len(текст))),
+                                             offsets=[(i, i + 1) for i in range(len(текст))])
+
+            def encode_batch(self, пары):
+                # «Модель» узнаёт ответ, только если он целиком в окне.
+                return [types.SimpleNamespace(ids=[1 if "ОТВЕТ" in окно else 0], attention_mask=[1])
+                        for _, окно in пары]
+
+        class Сессия:
+            def get_inputs(self):
+                return [types.SimpleNamespace(name="input_ids")]
+
+            def run(self, _, данные):
+                return [np.where(данные["input_ids"] == 1, 5.0, -5.0).astype(np.float32)]
+
+        текст = "начало договора " * 5 + "ОТВЕТ"
+        чанк = Чанк(chunk_id="c", стратегия="структура", источник="f.pdf", название="f",
+                    номер=0, текст=текст, раздел="2", контекст="f › 2")
+        к = rag_rerank.КроссЭнкодер(None, длина=40, перекрытие=10)
+        к._сессия, к._токенизатор, к._разметка = Сессия(), Посимвольно(), Посимвольно()
+        окна = к.окна("вопрос", чанк)
+        self.assertGreater(len(окна), 1)
+        self.assertTrue(all(о.startswith("f › 2\n") for о in окна))    # паспорт в каждом окне
+        self.assertIn("ОТВЕТ", окна[-1])
+        [оценка] = к.оценить("вопрос", [Находка(чанк, 0.5, 1)])
+        self.assertGreater(оценка, 0.99)                                # лучшее окно
+        self.assertEqual(к.пар, len(окна))
+        # Без окон (длина с запасом) — одно окно, как раньше.
+        широкий = rag_rerank.КроссЭнкодер(None, длина=1000)
+        широкий._разметка = Посимвольно()
+        self.assertEqual(широкий.окна("вопрос", чанк), ["f › 2\n" + текст])
+        # Оценки обрезанных пар и окон не смешиваются в кэше.
+        self.assertNotEqual(к.ключ_кэша, rag_rerank.КРОСС)
+        # Окна у энкодера, чьи оценки пришли из кэша: разметка грузится сама.
+        свежий = rag_rerank.КроссЭнкодер(None, длина=40, перекрытие=10)
+
+        def загрузить():
+            свежий._разметка = Посимвольно()
+
+        with mock.patch.object(свежий, "загрузить", side_effect=загрузить) as загрузка:
+            self.assertEqual(свежий.окна("вопрос", чанк), окна)
+        загрузка.assert_called_once()
 
     def test_кросс_энкодер_без_модели_внятная_ошибка(self):
         к = rag_rerank.КроссЭнкодер(None, модель="нет/такой-модели")
